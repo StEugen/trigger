@@ -47,6 +47,14 @@ Create a simple trigger that runs a command:
 trigger create mycommand -- echo "Hello, World!"
 ```
 
+### Deleting Triggers
+
+Delete a trigger with name: 
+
+```bash
+trigger delete --name mycommand 
+```
+
 #### Trigger with Arguments
 
 Create a trigger with placeholder arguments that can be filled at runtime:

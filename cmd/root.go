@@ -38,6 +38,7 @@ func Initialize() error {
 
 	// Add subcommands
 	rootCmd.AddCommand(createCmd)
+	rootCmd.AddCommand(deleteCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(signCmd)
