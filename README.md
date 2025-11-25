@@ -52,7 +52,7 @@ trigger create mycommand -- echo "Hello, World!"
 Create a trigger with placeholder arguments that can be filled at runtime:
 
 ```bash
-trigger create backup -- tar -czf [arg0] /etc
+trigger create backup -- tar -czf '[arg0]' /etc
 ```
 
 When running, you can provide arguments:
@@ -65,13 +65,15 @@ trigger run --name backup --args ./backup.tar.gz
 Multiple argument placeholders:
 
 ```bash
-trigger create copy -- cp [arg0] [arg1]
+trigger create copy -- cp '[arg0]' '[arg1]'
 ```
 
 ```bash
 trigger run --name copy --args /source/file.txt /dest/file.txt
 # Executes: cp /source/file.txt /dest/file.txt
 ```
+
+**Note:** Quote the placeholder arguments (`[arg0]`, `[arg1]`, etc.) to prevent your shell from interpreting the square brackets as glob patterns.
 
 #### Trigger with Embedded Script
 
@@ -95,7 +97,7 @@ trigger run --name alert-slack --payload message.json
 #### Combined: Script with Argument Placeholders
 
 ```bash
-trigger create process-data -- ./transform.py [arg0] [arg1]
+trigger create process-data -- ./transform.py '[arg0]' '[arg1]'
 ```
 
 ```bash
@@ -250,7 +252,7 @@ trigger run --name notify-slack --payload alert.json
 ### 3. Log Processing Trigger
 
 ```bash
-trigger create process-logs -- gawk -f [arg0] [arg1]
+trigger create process-logs -- gawk -f '[arg0]' '[arg1]'
 trigger run --name process-logs --args filter.awk access.log
 ```
 
@@ -340,7 +342,7 @@ Placeholders use the format `[argN]` where `N` is a zero-indexed number:
 Example:
 
 ```bash
-trigger create deploy -- rsync -av [arg0] [arg1]
+trigger create deploy -- rsync -av '[arg0]' '[arg1]'
 trigger run --name deploy --args ./src/ user@server:/dest/
 ```
 
