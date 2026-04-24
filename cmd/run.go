@@ -53,6 +53,7 @@ Examples:
 
 		// Determine command to run
 		commandToRun := trigger.Command
+		commandArgs := append([]string{}, resolvedArgs...)
 		if trigger.ScriptContent != "" {
 			scriptPath, err := internal.WriteEmbeddedScript(
 				storage.ScriptsDir(),
@@ -64,19 +65,37 @@ Examples:
 				return fmt.Errorf("failed to write embedded script: %w", err)
 			}
 			commandToRun = scriptPath
+
+			scriptName := trigger.ScriptPath
+			if scriptName == "" {
+				scriptName = scriptPath
+			}
+
+			if !internal.HasShebang(trigger.ScriptContent) {
+				interpreter, ok := internal.ScriptInterpreter(scriptName)
+				if !ok {
+					return fmt.Errorf("embedded script '%s' requires a shebang or a known script extension", scriptName)
+				}
+				if _, err := exec.LookPath(interpreter); err != nil {
+					return fmt.Errorf("interpreter '%s' not found for embedded script '%s': %w", interpreter, scriptName, err)
+				}
+
+				commandToRun = interpreter
+				commandArgs = append([]string{scriptPath}, resolvedArgs...)
+			}
 		}
 
 		if GlobalDryRun {
-			fmt.Printf("[dry-run] would run: %s %v\n", commandToRun, resolvedArgs)
+			fmt.Printf("[dry-run] would run: %s %v\n", commandToRun, commandArgs)
 			return nil
 		}
 
 		if GlobalVerbose {
-			fmt.Printf("running: %s %v\n", commandToRun, resolvedArgs)
+			fmt.Printf("running: %s %v\n", commandToRun, commandArgs)
 		}
 
 		// Execute command
-		ctxCmd := exec.Command(commandToRun, resolvedArgs...)
+		ctxCmd := exec.Command(commandToRun, commandArgs...)
 
 		if runPayload != "" {
 			b, err := os.ReadFile(runPayload)
