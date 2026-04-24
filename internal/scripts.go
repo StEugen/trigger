@@ -1,7 +1,7 @@
 package internal
 
 import (
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -23,7 +23,7 @@ func IsScriptFile(path string) bool {
 
 // EmbedScript reads script content from disk
 func EmbedScript(scriptPath string) (string, error) {
-	content, err := ioutil.ReadFile(scriptPath)
+	content, err := os.ReadFile(scriptPath)
 	if err != nil {
 		return "", err
 	}
@@ -36,7 +36,7 @@ func WriteEmbeddedScript(scriptsDir string, triggerName string, originalPath str
 	filename := triggerName + ext
 	fullPath := filepath.Join(scriptsDir, filename)
 
-	if err := ioutil.WriteFile(fullPath, []byte(content), 0o755); err != nil {
+	if err := os.WriteFile(fullPath, []byte(content), 0o755); err != nil {
 		return "", err
 	}
 

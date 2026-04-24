@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -24,12 +24,12 @@ var signCmd = &cobra.Command{
 		var err error
 
 		if signPayload == "" {
-			b, err = ioutil.ReadAll(os.Stdin)
+			b, err = io.ReadAll(os.Stdin)
 			if err != nil {
 				return err
 			}
 		} else {
-			b, err = ioutil.ReadFile(signPayload)
+			b, err = os.ReadFile(signPayload)
 			if err != nil {
 				return err
 			}

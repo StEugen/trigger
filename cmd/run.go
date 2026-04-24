@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"time"
@@ -36,6 +35,9 @@ Examples:
 			return fmt.Errorf("--name is required")
 		}
 
+		runtimeArgs := append([]string{}, runArgs...)
+		runtimeArgs = append(runtimeArgs, args...)
+
 		storage, err := internal.NewStorage(GlobalConfig.ConfigDir)
 		if err != nil {
 			return err
@@ -47,7 +49,7 @@ Examples:
 		}
 
 		// Resolve argument placeholders
-		resolvedArgs := internal.ResolveArguments(trigger.Args, runArgs)
+		resolvedArgs := internal.ResolveArguments(trigger.Args, runtimeArgs)
 
 		// Determine command to run
 		commandToRun := trigger.Command
@@ -77,7 +79,7 @@ Examples:
 		ctxCmd := exec.Command(commandToRun, resolvedArgs...)
 
 		if runPayload != "" {
-			b, err := ioutil.ReadFile(runPayload)
+			b, err := os.ReadFile(runPayload)
 			if err != nil {
 				return err
 			}

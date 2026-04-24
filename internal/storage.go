@@ -3,7 +3,6 @@ package internal
 import (
 	"encoding/json"
 	"errors"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 )
@@ -39,7 +38,7 @@ func (s *Storage) LoadTriggers() ([]Trigger, error) {
 		return []Trigger{}, nil
 	}
 
-	b, err := ioutil.ReadFile(s.triggersPath)
+	b, err := os.ReadFile(s.triggersPath)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +57,7 @@ func (s *Storage) SaveTriggers(triggers []Trigger) error {
 	if err != nil {
 		return err
 	}
-	return ioutil.WriteFile(s.triggersPath, b, 0o600)
+	return os.WriteFile(s.triggersPath, b, 0o600)
 }
 
 // FindByName retrieves a trigger by name
