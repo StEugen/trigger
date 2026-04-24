@@ -1,0 +1,108 @@
+name: Public Build
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.asset_name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            goos: linux
+            goarch: amd64
+            asset_name: trigger-linux-amd64
+          - runner: macos-14
+            goos: darwin
+            goarch: arm64
+            asset_name: trigger-darwin-arm64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build release archive
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          package_dir="dist/${{ matrix.asset_name }}"
+          mkdir -p "$package_dir"
+
+          GOOS="${{ matrix.goos }}" GOARCH="${{ matrix.goarch }}" CGO_ENABLED=0 \
+            go build -trimpath -ldflags="-s -w" -o "$package_dir/trigger" .
+
+          cp LICENSE "$package_dir/"
+          cp README.md "$package_dir/"
+
+          tar -C dist -czf "dist/${{ matrix.asset_name }}.tar.gz" "${{ matrix.asset_name }}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: dist/${{ matrix.asset_name }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Prepare release metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "tag=main-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          cat > release-notes.md <<EOF
+          Automated build from a push to \`main\`.
+
+          Commit: https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}
+          EOF
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t assets < <(find dist -type f -name '*.tar.gz' | sort)
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "No release archives found." >&2
+            exit 1
+          fi
+
+          if gh release view "${{ steps.meta.outputs.tag }}" >/dev/null 2>&1; then
+            gh release upload "${{ steps.meta.outputs.tag }}" "${assets[@]}" --clobber
+          else
+            gh release create "${{ steps.meta.outputs.tag }}" "${assets[@]}" \
+              --target "${GITHUB_SHA}" \
+              --title "Main build ${{ steps.meta.outputs.short_sha }}" \
+              --notes-file release-notes.md \
+              --prerelease \
+              --latest=false
+          fi
