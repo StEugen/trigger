@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/steugen/trigger/internal"
@@ -43,7 +42,7 @@ Examples:
 
 		// Delete associated script if it exists
 		if trigger.ScriptPath != "" {
-			scriptPath := filepath.Join(storage.ScriptsDir(), trigger.ScriptPath)
+			scriptPath := internal.EmbeddedScriptPath(storage.ScriptsDir(), trigger.Name, trigger.ScriptPath)
 			if _, err := os.Stat(scriptPath); err == nil {
 				if err := os.Remove(scriptPath); err != nil {
 					return fmt.Errorf("failed to delete script: %w", err)

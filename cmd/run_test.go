@@ -87,6 +87,88 @@ func TestRunCmdAppendsExtraArgsWithoutPlaceholders(t *testing.T) {
 	}
 }
 
+func TestRunCmdUsesInterpreterForEmbeddedScriptWithoutShebang(t *testing.T) {
+	configDir := t.TempDir()
+	storage, err := internal.NewStorage(configDir)
+	if err != nil {
+		t.Fatalf("NewStorage() error = %v", err)
+	}
+
+	err = storage.SaveTriggers([]internal.Trigger{
+		{
+			Name:          "hello",
+			Command:       internal.EmbeddedScriptPath(storage.ScriptsDir(), "hello", "hello.sh"),
+			ScriptContent: "echo hello\n",
+			ScriptPath:    "hello.sh",
+			CreatedAt:     time.Now().UTC(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveTriggers() error = %v", err)
+	}
+
+	GlobalConfig = &internal.Config{ConfigDir: configDir}
+	GlobalDryRun = true
+	GlobalVerbose = false
+	runName = "hello"
+	runArgs = nil
+	runPayload = ""
+	runTimeout = 0
+
+	output := captureStdout(t, func() {
+		if err := runCmd.RunE(runCmd, nil); err != nil {
+			t.Fatalf("RunE() error = %v", err)
+		}
+	})
+
+	expectedPath := internal.EmbeddedScriptPath(storage.ScriptsDir(), "hello", "hello.sh")
+	expected := "[dry-run] would run: sh [" + expectedPath + "]"
+	if !strings.Contains(output, expected) {
+		t.Fatalf("unexpected output: %q", output)
+	}
+}
+
+func TestRunCmdExecutesEmbeddedScriptDirectlyWithShebang(t *testing.T) {
+	configDir := t.TempDir()
+	storage, err := internal.NewStorage(configDir)
+	if err != nil {
+		t.Fatalf("NewStorage() error = %v", err)
+	}
+
+	err = storage.SaveTriggers([]internal.Trigger{
+		{
+			Name:          "hello",
+			Command:       internal.EmbeddedScriptPath(storage.ScriptsDir(), "hello", "hello.sh"),
+			ScriptContent: "#!/bin/sh\necho hello\n",
+			ScriptPath:    "hello.sh",
+			CreatedAt:     time.Now().UTC(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveTriggers() error = %v", err)
+	}
+
+	GlobalConfig = &internal.Config{ConfigDir: configDir}
+	GlobalDryRun = true
+	GlobalVerbose = false
+	runName = "hello"
+	runArgs = nil
+	runPayload = ""
+	runTimeout = 0
+
+	output := captureStdout(t, func() {
+		if err := runCmd.RunE(runCmd, nil); err != nil {
+			t.Fatalf("RunE() error = %v", err)
+		}
+	})
+
+	expectedPath := internal.EmbeddedScriptPath(storage.ScriptsDir(), "hello", "hello.sh")
+	expected := "[dry-run] would run: " + expectedPath + " []"
+	if !strings.Contains(output, expected) {
+		t.Fatalf("unexpected output: %q", output)
+	}
+}
+
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 
