@@ -28,6 +28,7 @@ const (
 	ansiYellow      = "\033[38;5;220m"
 	ansiRed         = "\033[38;5;196m"
 	ansiGray        = "\033[38;5;244m"
+	ansiSilver      = "\033[38;5;252m"
 	ansiBlackGreen  = "\033[30;48;5;46m"
 	ansiBlackCyan   = "\033[30;48;5;51m"
 	ansiBlackYellow = "\033[30;48;5;220m"
@@ -89,7 +90,7 @@ func (ui *terminalUI) Run() error {
 		sorted := sortTriggersByName(triggers)
 		ui.renderHome(sorted)
 
-		choice, err := ui.prompt("select action")
+		choice, err := ui.prompt("select option")
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				fmt.Fprintln(ui.out)
@@ -119,7 +120,7 @@ func (ui *terminalUI) Run() error {
 			continue
 		case "4", "q", "quit", "exit":
 			ui.clearScreen()
-			fmt.Fprintln(ui.out, ui.paint("[ session closed ]", ansiDim, ansiGray))
+			fmt.Fprintln(ui.out, ui.note("[ session closed ]"))
 			return nil
 		default:
 			if err := ui.showError(fmt.Errorf("unknown action %q", choice)); err != nil {
@@ -139,7 +140,7 @@ func (ui *terminalUI) renderHome(triggers []internal.Trigger) {
 		ui.badge("mode", ui.modeLabel(ui.dryRun), ui.modeColor(ui.dryRun)),
 		ui.badge("verbose", onOff(ui.verbose), ui.toggleColor(ui.verbose)),
 	)
-	fmt.Fprintf(ui.out, "  %s %s\n\n", ui.paint("config", ansiDim, ansiGray), ui.paint(GlobalConfig.ConfigDir, ansiCyan))
+	fmt.Fprintf(ui.out, "  %s %s\n\n", ui.label("config"), ui.paint(GlobalConfig.ConfigDir, ansiCyan))
 
 	ui.printSection("LOCAL TRIGGER CACHE")
 	if len(triggers) == 0 {
@@ -157,7 +158,7 @@ func (ui *terminalUI) renderHome(triggers []internal.Trigger) {
 	fmt.Fprintf(ui.out, "  %s %s reload trigger cache view\n", ui.actionLabel("3"), ui.paint("refresh", ansiBold, ansiGreenBright))
 	fmt.Fprintf(ui.out, "  %s %s leave the console\n", ui.actionLabel("4"), ui.paint("quit", ansiBold, ansiGreenBright))
 	fmt.Fprintln(ui.out)
-	fmt.Fprintln(ui.out, ui.paint("[ tip ] quoted args and escaped spaces are preserved.", ansiDim, ansiGray))
+	fmt.Fprintf(ui.out, "  %s %s\n", ui.paint("[ tip ]", ansiYellow, ansiBold), ui.note("quoted args and escaped spaces are preserved."))
 	fmt.Fprintln(ui.out)
 }
 
@@ -201,7 +202,7 @@ func (ui *terminalUI) createTrigger() error {
 	} else {
 		ui.printSuccess(fmt.Sprintf("trigger '%s' forged and indexed", trigger.Name))
 	}
-	fmt.Fprintf(ui.out, "  %s %s\n", ui.paint("command", ansiDim, ansiGray), ui.paint(ui.commandPreview(*trigger), ansiCyan))
+	fmt.Fprintf(ui.out, "  %s %s\n", ui.label("command"), ui.paint(ui.commandPreview(*trigger), ansiCyan))
 
 	return nil
 }
@@ -267,16 +268,16 @@ func (ui *terminalUI) runTrigger(triggers []internal.Trigger) error {
 
 	fmt.Fprintln(ui.out)
 	ui.printSection("EXECUTION TRACE")
-	fmt.Fprintf(ui.out, "  %s %s\n", ui.paint("target", ansiDim, ansiGray), ui.paint(trigger.Name, ansiGreenBright, ansiBold))
-	fmt.Fprintf(ui.out, "  %s %s\n", ui.paint("command", ansiDim, ansiGray), ui.paint(ui.commandPreview(*trigger), ansiCyan))
-	fmt.Fprintf(ui.out, "  %s %d\n", ui.paint("runtime args", ansiDim, ansiGray), len(runtimeArgs))
+	fmt.Fprintf(ui.out, "  %s %s\n", ui.label("target"), ui.paint(trigger.Name, ansiGreenBright, ansiBold))
+	fmt.Fprintf(ui.out, "  %s %s\n", ui.label("command"), ui.paint(ui.commandPreview(*trigger), ansiCyan))
+	fmt.Fprintf(ui.out, "  %s %d\n", ui.label("runtime args"), len(runtimeArgs))
 	if payloadPath != "" {
-		fmt.Fprintf(ui.out, "  %s %s\n", ui.paint("payload", ansiDim, ansiGray), ui.paint(payloadPath, ansiCyan))
+		fmt.Fprintf(ui.out, "  %s %s\n", ui.label("payload"), ui.paint(payloadPath, ansiCyan))
 	}
 	if timeout > 0 {
-		fmt.Fprintf(ui.out, "  %s %s\n", ui.paint("timeout", ansiDim, ansiGray), ui.paint(timeout.String(), ansiYellow))
+		fmt.Fprintf(ui.out, "  %s %s\n", ui.label("timeout"), ui.paint(timeout.String(), ansiYellow))
 	}
-	fmt.Fprintf(ui.out, "  %s %s\n\n", ui.paint("mode", ansiDim, ansiGray), ui.paint(ui.modeLabel(dryRun), ui.modeTextColor(dryRun), ansiBold))
+	fmt.Fprintf(ui.out, "  %s %s\n\n", ui.label("mode"), ui.paint(ui.modeLabel(dryRun), ui.modeTextColor(dryRun), ansiBold))
 
 	return internal.RunTrigger(ui.storage, trigger.Name, runtimeArgs, internal.RunTriggerOptions{
 		PayloadPath: payloadPath,
@@ -289,7 +290,7 @@ func (ui *terminalUI) runTrigger(triggers []internal.Trigger) error {
 }
 
 func (ui *terminalUI) prompt(label string) (string, error) {
-	fmt.Fprintf(ui.out, "%s %s %s ", ui.shellPrompt(), ui.paint(label, ansiDim, ansiGray), ui.paint(">", ansiBold, ansiGreenBright))
+	fmt.Fprintf(ui.out, "%s %s %s ", ui.shellPrompt(), ui.label(label), ui.paint(">", ansiBold, ansiGreenBright))
 	line, err := ui.reader.ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		return "", err
@@ -347,7 +348,7 @@ func (ui *terminalUI) showError(err error) error {
 
 func (ui *terminalUI) pause(message string) error {
 	fmt.Fprintln(ui.out)
-	fmt.Fprintf(ui.out, "%s %s ", ui.paint("[ idle ]", ansiDim, ansiGray), ui.paint(message, ansiDim, ansiGray))
+	fmt.Fprintf(ui.out, "%s %s ", ui.label("[ idle ]"), ui.note(message))
 	_, err := ui.reader.ReadString('\n')
 	if errors.Is(err, io.EOF) {
 		return nil
@@ -374,7 +375,7 @@ func (ui *terminalUI) printBanner() {
 	for _, line := range lines {
 		fmt.Fprintln(ui.out, ui.paint(line, ansiGreenBright, ansiBold))
 	}
-	fmt.Fprintf(ui.out, "%s %s\n", ui.badge("console", "local ops", ansiBlackCyan), ui.paint("event->action relay // stash, forge, dispatch", ansiDim, ansiGray))
+	fmt.Fprintf(ui.out, "%s %s\n", ui.badge("console", "local ops", ansiBlackCyan), ui.bannerTagline())
 	fmt.Fprintln(ui.out, ui.paint(strings.Repeat("=", tuiWidth), ansiGreen, ansiDim))
 	fmt.Fprintln(ui.out)
 }
@@ -402,7 +403,7 @@ func (ui *terminalUI) actionLabel(id string) string {
 func (ui *terminalUI) formatTriggerLine(index int, trigger internal.Trigger) string {
 	meta := ui.badge(fmt.Sprintf("%02d", index+1), "idx", ansiBlackGreen)
 	name := ui.paint(padRight(trigger.Name, 18), ansiCyan, ansiBold)
-	preview := ui.paint(shorten(ui.commandPreview(trigger), 42), ansiGray)
+	preview := ui.note(shorten(ui.commandPreview(trigger), 42))
 	line := fmt.Sprintf("  %s  %s :: %s", meta, name, preview)
 	if trigger.ScriptContent != "" {
 		line += " " + ui.badge("script", trigger.ScriptPath, ansiBlackYellow)
@@ -445,6 +446,30 @@ func (ui *terminalUI) toggleColor(enabled bool) string {
 
 func (ui *terminalUI) shellPrompt() string {
 	return ui.paint("root@trigger", ansiGreenBright, ansiBold)
+}
+
+func (ui *terminalUI) label(text string) string {
+	return ui.paint(text, ansiSilver, ansiBold)
+}
+
+func (ui *terminalUI) note(text string) string {
+	return ui.paint(text, ansiSilver)
+}
+
+func (ui *terminalUI) bannerTagline() string {
+	if !ui.canStyle {
+		return "event->action relay // stash, forge, dispatch"
+	}
+
+	return ui.paint("event", ansiGreenBright, ansiBold) +
+		ui.paint("->", ansiSilver, ansiBold) +
+		ui.paint("action relay", ansiCyan, ansiBold) +
+		ui.paint(" // ", ansiSilver) +
+		ui.paint("stash", ansiYellow, ansiBold) +
+		ui.paint(", ", ansiSilver) +
+		ui.paint("forge", ansiGreenBright, ansiBold) +
+		ui.paint(", ", ansiSilver) +
+		ui.paint("dispatch", ansiCyan, ansiBold)
 }
 
 func (ui *terminalUI) badge(label string, value string, color string) string {
