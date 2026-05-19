@@ -2,9 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"io"
-	"os"
-	"os/exec"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -43,98 +40,14 @@ Examples:
 			return err
 		}
 
-		trigger, _, err := storage.FindByName(runName)
-		if err != nil {
-			return err
-		}
-
-		// Resolve argument placeholders
-		resolvedArgs := internal.ResolveArguments(trigger.Args, runtimeArgs)
-
-		// Determine command to run
-		commandToRun := trigger.Command
-		commandArgs := append([]string{}, resolvedArgs...)
-		if trigger.ScriptContent != "" {
-			scriptPath, err := internal.WriteEmbeddedScript(
-				storage.ScriptsDir(),
-				trigger.Name,
-				trigger.ScriptPath,
-				trigger.ScriptContent,
-			)
-			if err != nil {
-				return fmt.Errorf("failed to write embedded script: %w", err)
-			}
-			commandToRun = scriptPath
-
-			scriptName := trigger.ScriptPath
-			if scriptName == "" {
-				scriptName = scriptPath
-			}
-
-			if !internal.HasShebang(trigger.ScriptContent) {
-				interpreter, ok := internal.ScriptInterpreter(scriptName)
-				if !ok {
-					return fmt.Errorf("embedded script '%s' requires a shebang or a known script extension", scriptName)
-				}
-				if _, err := exec.LookPath(interpreter); err != nil {
-					return fmt.Errorf("interpreter '%s' not found for embedded script '%s': %w", interpreter, scriptName, err)
-				}
-
-				commandToRun = interpreter
-				commandArgs = append([]string{scriptPath}, resolvedArgs...)
-			}
-		}
-
-		if GlobalDryRun {
-			fmt.Printf("[dry-run] would run: %s %v\n", commandToRun, commandArgs)
-			return nil
-		}
-
-		if GlobalVerbose {
-			fmt.Printf("running: %s %v\n", commandToRun, commandArgs)
-		}
-
-		// Execute command
-		ctxCmd := exec.Command(commandToRun, commandArgs...)
-
-		if runPayload != "" {
-			b, err := os.ReadFile(runPayload)
-			if err != nil {
-				return err
-			}
-
-			stdin, err := ctxCmd.StdinPipe()
-			if err != nil {
-				return err
-			}
-
-			go func() {
-				defer stdin.Close()
-				io.WriteString(stdin, string(b))
-			}()
-		}
-
-		ctxCmd.Stdout = os.Stdout
-		ctxCmd.Stderr = os.Stderr
-
-		if runTimeout > 0 {
-			if err := ctxCmd.Start(); err != nil {
-				return err
-			}
-
-			c := make(chan error)
-			go func() { c <- ctxCmd.Wait() }()
-
-			select {
-			case err := <-c:
-				return err
-			case <-time.After(runTimeout):
-				ctxCmd.Process.Kill()
-				return fmt.Errorf("command timed out after %s", runTimeout)
-			}
-		}
-
-		return ctxCmd.Run()
+		return internal.RunTrigger(storage, runName, runtimeArgs, internal.RunTriggerOptions{
+			PayloadPath: runPayload,
+			Timeout:     runTimeout,
+			DryRun:      GlobalDryRun,
+			Verbose:     GlobalVerbose,
+			Stdout:      cmd.OutOrStdout(),
+			Stderr:      cmd.ErrOrStderr(),
+		})
 	},
 }
 

@@ -15,6 +15,7 @@ NOTICE: XDXD TOOL COMPLETELY Very Inefficient But Entertaining CODED. I'm gonna 
   - **Payload Piping** — Pass JSON/text payloads via stdin
   - **Timeout Support** — Kill long-running commands
   - **Dry-run Mode** — Preview what would execute without running
+- **Interactive TUI** — Manage local triggers in a terminal UI for listing, creating, and running triggers
 - **Script Embedding** — Automatically detect and embed script files (`.sh`, `.py`, `.js`, `.rb`, `.php`, `.pl`, `.lua`, `.groovy`, `.swift`) so they don't need to exist on disk
 - **Sign Payloads** — Compute HMAC-SHA256 signatures using `TRIGGER_SECRET` env var (useful for webhook verification)
 - **Shell Completions** — Generate completion scripts for bash, zsh, fish, and powershell
@@ -127,6 +128,19 @@ Output:
 - alert-slack: /home/user/.config/trigger/scripts/alert-slack.sh [embedded: send_slack_alert.sh]
 - copy: cp [arg0] [arg1]
 ```
+
+### Terminal UI
+
+Open the interactive terminal UI:
+
+```bash
+trigger tui
+```
+
+From there you can:
+- view all locally registered triggers
+- create a new trigger by entering a command line
+- select a trigger by number or name and run it
 
 ### Running Triggers
 

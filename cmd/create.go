@@ -2,9 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steugen/trigger/internal"
@@ -41,54 +38,11 @@ Examples:
 			return err
 		}
 
-		if storage.Exists(name) {
-			return fmt.Errorf("trigger '%s' already exists", name)
-		}
-
-		// Create trigger
-		trigger := internal.Trigger{
-			Name:      name,
-			Command:   command,
-			Args:      commandArgs,
-			CreatedAt: time.Now().UTC(),
-		}
-
-		// Handle script embedding
-		if internal.IsScriptFile(command) {
-			if _, err := os.Stat(command); err == nil {
-				content, err := internal.EmbedScript(command)
-				if err != nil {
-					return fmt.Errorf("failed to read script: %w", err)
-				}
-
-				scriptPath, err := internal.WriteEmbeddedScript(
-					storage.ScriptsDir(),
-					name,
-					command,
-					content,
-				)
-				if err != nil {
-					return fmt.Errorf("failed to embed script: %w", err)
-				}
-
-				trigger.ScriptContent = content
-				trigger.ScriptPath = filepath.Base(command)
-				trigger.Command = scriptPath
-
-				if GlobalVerbose {
-					fmt.Printf("embedded script '%s' into trigger\n", command)
-				}
-			}
-		}
-
-		// Save
-		triggers, err := storage.LoadTriggers()
+		trigger, err := internal.CreateTrigger(storage, name, command, commandArgs, internal.CreateTriggerOptions{
+			Verbose: GlobalVerbose,
+			Output:  cmd.OutOrStdout(),
+		})
 		if err != nil {
-			return err
-		}
-
-		triggers = append(triggers, trigger)
-		if err := storage.SaveTriggers(triggers); err != nil {
 			return err
 		}
 

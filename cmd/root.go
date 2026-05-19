@@ -42,6 +42,7 @@ func Initialize() error {
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(signCmd)
+	rootCmd.AddCommand(tuiCmd)
 	rootCmd.AddCommand(versionCmd)
 
 	// Set up completion with root cmd reference

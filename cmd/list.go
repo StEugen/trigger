@@ -27,11 +27,7 @@ var listCmd = &cobra.Command{
 		}
 
 		for _, t := range triggers {
-			if t.ScriptContent != "" {
-				fmt.Printf("- %s: %s %v [embedded: %s]\n", t.Name, t.Command, t.Args, t.ScriptPath)
-			} else {
-				fmt.Printf("- %s: %s %v\n", t.Name, t.Command, t.Args)
-			}
+			fmt.Printf("- %s\n", internal.FormatTriggerSummary(t))
 		}
 
 		return nil
