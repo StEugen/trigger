@@ -16,6 +16,24 @@ import (
 	"github.com/steugen/trigger/internal"
 )
 
+const tuiWidth = 78
+
+const (
+	ansiReset       = "\033[0m"
+	ansiBold        = "\033[1m"
+	ansiDim         = "\033[2m"
+	ansiGreen       = "\033[38;5;46m"
+	ansiGreenBright = "\033[38;5;118m"
+	ansiCyan        = "\033[38;5;51m"
+	ansiYellow      = "\033[38;5;220m"
+	ansiRed         = "\033[38;5;196m"
+	ansiGray        = "\033[38;5;244m"
+	ansiBlackGreen  = "\033[30;48;5;46m"
+	ansiBlackCyan   = "\033[30;48;5;51m"
+	ansiBlackYellow = "\033[30;48;5;220m"
+	ansiBlackRed    = "\033[30;48;5;196m"
+)
+
 var tuiCmd = &cobra.Command{
 	Use:   "tui",
 	Short: "interactive terminal UI for local triggers",
@@ -45,6 +63,7 @@ type terminalUI struct {
 	dryRun   bool
 	verbose  bool
 	canClear bool
+	canStyle bool
 }
 
 func newTerminalUI(input io.Reader, out io.Writer, errOut io.Writer, storage *internal.Storage, dryRun bool, verbose bool) *terminalUI {
@@ -56,6 +75,7 @@ func newTerminalUI(input io.Reader, out io.Writer, errOut io.Writer, storage *in
 		dryRun:   dryRun,
 		verbose:  verbose,
 		canClear: canClearScreen(out),
+		canStyle: canUseANSI(out),
 	}
 }
 
@@ -69,7 +89,7 @@ func (ui *terminalUI) Run() error {
 		sorted := sortTriggersByName(triggers)
 		ui.renderHome(sorted)
 
-		choice, err := ui.prompt("Select action")
+		choice, err := ui.prompt("select action")
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				fmt.Fprintln(ui.out)
@@ -84,7 +104,7 @@ func (ui *terminalUI) Run() error {
 				if pauseErr := ui.showError(err); pauseErr != nil {
 					return pauseErr
 				}
-			} else if err := ui.pause("Press Enter to return to the menu..."); err != nil {
+			} else if err := ui.pause("Press Enter to return to the console..."); err != nil {
 				return err
 			}
 		case "2", "r", "run":
@@ -92,12 +112,14 @@ func (ui *terminalUI) Run() error {
 				if pauseErr := ui.showError(err); pauseErr != nil {
 					return pauseErr
 				}
-			} else if err := ui.pause("Press Enter to return to the menu..."); err != nil {
+			} else if err := ui.pause("Press Enter to return to the console..."); err != nil {
 				return err
 			}
 		case "3", "l", "list", "refresh", "":
 			continue
 		case "4", "q", "quit", "exit":
+			ui.clearScreen()
+			fmt.Fprintln(ui.out, ui.paint("[ session closed ]", ansiDim, ansiGray))
 			return nil
 		default:
 			if err := ui.showError(fmt.Errorf("unknown action %q", choice)); err != nil {
@@ -110,43 +132,49 @@ func (ui *terminalUI) Run() error {
 func (ui *terminalUI) renderHome(triggers []internal.Trigger) {
 	ui.clearScreen()
 
-	fmt.Fprintln(ui.out, "trigger tui")
-	fmt.Fprintln(ui.out, "===========")
-	fmt.Fprintln(ui.out)
-	fmt.Fprintln(ui.out, "Local triggers:")
+	ui.printBanner()
+	ui.printSection("CONTROL STATE")
+	fmt.Fprintf(ui.out, "  %s  %s  %s\n",
+		ui.badge("cache", fmt.Sprintf("%d loaded", len(triggers)), ansiBlackGreen),
+		ui.badge("mode", ui.modeLabel(ui.dryRun), ui.modeColor(ui.dryRun)),
+		ui.badge("verbose", onOff(ui.verbose), ui.toggleColor(ui.verbose)),
+	)
+	fmt.Fprintf(ui.out, "  %s %s\n\n", ui.paint("config", ansiDim, ansiGray), ui.paint(GlobalConfig.ConfigDir, ansiCyan))
+
+	ui.printSection("LOCAL TRIGGER CACHE")
 	if len(triggers) == 0 {
-		fmt.Fprintln(ui.out, "  (none)")
+		fmt.Fprintf(ui.out, "  %s local stash is cold. forge something.\n", ui.paint("[empty]", ansiYellow, ansiBold))
 	} else {
 		for i, trigger := range triggers {
-			fmt.Fprintf(ui.out, "  %d. %s\n", i+1, internal.FormatTriggerSummary(trigger))
+			fmt.Fprintln(ui.out, ui.formatTriggerLine(i, trigger))
 		}
 	}
+	fmt.Fprintln(ui.out)
 
+	ui.printSection("OPS MENU")
+	fmt.Fprintf(ui.out, "  %s %s forge a new trigger into local storage\n", ui.actionLabel("1"), ui.paint("create", ansiBold, ansiGreenBright))
+	fmt.Fprintf(ui.out, "  %s %s dispatch an existing trigger\n", ui.actionLabel("2"), ui.paint("run", ansiBold, ansiGreenBright))
+	fmt.Fprintf(ui.out, "  %s %s reload trigger cache view\n", ui.actionLabel("3"), ui.paint("refresh", ansiBold, ansiGreenBright))
+	fmt.Fprintf(ui.out, "  %s %s leave the console\n", ui.actionLabel("4"), ui.paint("quit", ansiBold, ansiGreenBright))
 	fmt.Fprintln(ui.out)
-	fmt.Fprintln(ui.out, "Actions:")
-	fmt.Fprintln(ui.out, "  1. Create trigger")
-	fmt.Fprintln(ui.out, "  2. Run trigger")
-	fmt.Fprintln(ui.out, "  3. Refresh list")
-	fmt.Fprintln(ui.out, "  4. Quit")
+	fmt.Fprintln(ui.out, ui.paint("[ tip ] quoted args and escaped spaces are preserved.", ansiDim, ansiGray))
 	fmt.Fprintln(ui.out)
-	if ui.dryRun {
-		fmt.Fprintln(ui.out, "Run mode: dry-run enabled from global flag")
-		fmt.Fprintln(ui.out)
-	}
 }
 
 func (ui *terminalUI) createTrigger() error {
 	ui.clearScreen()
-	fmt.Fprintln(ui.out, "Create Trigger")
-	fmt.Fprintln(ui.out, "==============")
+	ui.printBanner()
+	ui.printSection("FORGE NEW TRIGGER")
+	fmt.Fprintln(ui.out, "  Enter a trigger name and a full command line.")
+	fmt.Fprintln(ui.out, "  Existing script paths are embedded automatically into the local stash.")
 	fmt.Fprintln(ui.out)
 
-	name, err := ui.promptRequired("Trigger name")
+	name, err := ui.promptRequired("trigger name")
 	if err != nil {
 		return err
 	}
 
-	commandLine, err := ui.promptRequired("Command line")
+	commandLine, err := ui.promptRequired("command line")
 	if err != nil {
 		return err
 	}
@@ -169,30 +197,32 @@ func (ui *terminalUI) createTrigger() error {
 
 	fmt.Fprintln(ui.out)
 	if trigger.ScriptContent != "" {
-		fmt.Fprintf(ui.out, "Created trigger '%s' -> %s %v (script embedded)\n", trigger.Name, trigger.Command, trigger.Args)
+		ui.printSuccess(fmt.Sprintf("trigger '%s' forged with embedded script payload", trigger.Name))
 	} else {
-		fmt.Fprintf(ui.out, "Created trigger '%s' -> %s %v\n", trigger.Name, trigger.Command, trigger.Args)
+		ui.printSuccess(fmt.Sprintf("trigger '%s' forged and indexed", trigger.Name))
 	}
+	fmt.Fprintf(ui.out, "  %s %s\n", ui.paint("command", ansiDim, ansiGray), ui.paint(ui.commandPreview(*trigger), ansiCyan))
 
 	return nil
 }
 
 func (ui *terminalUI) runTrigger(triggers []internal.Trigger) error {
 	if len(triggers) == 0 {
-		fmt.Fprintln(ui.out, "No triggers registered.")
+		ui.printWarning("no triggers registered")
 		return nil
 	}
 
 	ui.clearScreen()
-	fmt.Fprintln(ui.out, "Run Trigger")
-	fmt.Fprintln(ui.out, "===========")
+	ui.printBanner()
+	ui.printSection("DISPATCH TRIGGER")
+	fmt.Fprintln(ui.out, "  Pick a trigger by number or by exact name.")
 	fmt.Fprintln(ui.out)
 	for i, trigger := range triggers {
-		fmt.Fprintf(ui.out, "  %d. %s\n", i+1, internal.FormatTriggerSummary(trigger))
+		fmt.Fprintln(ui.out, ui.formatTriggerLine(i, trigger))
 	}
 	fmt.Fprintln(ui.out)
 
-	selection, err := ui.promptRequired("Trigger number or name")
+	selection, err := ui.promptRequired("trigger number or name")
 	if err != nil {
 		return err
 	}
@@ -202,7 +232,7 @@ func (ui *terminalUI) runTrigger(triggers []internal.Trigger) error {
 		return err
 	}
 
-	argsLine, err := ui.prompt("Runtime args (optional)")
+	argsLine, err := ui.prompt("runtime args (optional)")
 	if err != nil {
 		return err
 	}
@@ -212,12 +242,12 @@ func (ui *terminalUI) runTrigger(triggers []internal.Trigger) error {
 		return err
 	}
 
-	payloadPath, err := ui.prompt("Payload file path (optional)")
+	payloadPath, err := ui.prompt("payload file path (optional)")
 	if err != nil {
 		return err
 	}
 
-	timeoutText, err := ui.prompt("Timeout, e.g. 30s (optional)")
+	timeoutText, err := ui.prompt("timeout, e.g. 30s (optional)")
 	if err != nil {
 		return err
 	}
@@ -230,12 +260,24 @@ func (ui *terminalUI) runTrigger(triggers []internal.Trigger) error {
 		}
 	}
 
-	dryRun, err := ui.promptYesNo("Dry run", ui.dryRun)
+	dryRun, err := ui.promptYesNo("dry run", ui.dryRun)
 	if err != nil {
 		return err
 	}
 
 	fmt.Fprintln(ui.out)
+	ui.printSection("EXECUTION TRACE")
+	fmt.Fprintf(ui.out, "  %s %s\n", ui.paint("target", ansiDim, ansiGray), ui.paint(trigger.Name, ansiGreenBright, ansiBold))
+	fmt.Fprintf(ui.out, "  %s %s\n", ui.paint("command", ansiDim, ansiGray), ui.paint(ui.commandPreview(*trigger), ansiCyan))
+	fmt.Fprintf(ui.out, "  %s %d\n", ui.paint("runtime args", ansiDim, ansiGray), len(runtimeArgs))
+	if payloadPath != "" {
+		fmt.Fprintf(ui.out, "  %s %s\n", ui.paint("payload", ansiDim, ansiGray), ui.paint(payloadPath, ansiCyan))
+	}
+	if timeout > 0 {
+		fmt.Fprintf(ui.out, "  %s %s\n", ui.paint("timeout", ansiDim, ansiGray), ui.paint(timeout.String(), ansiYellow))
+	}
+	fmt.Fprintf(ui.out, "  %s %s\n\n", ui.paint("mode", ansiDim, ansiGray), ui.paint(ui.modeLabel(dryRun), ui.modeTextColor(dryRun), ansiBold))
+
 	return internal.RunTrigger(ui.storage, trigger.Name, runtimeArgs, internal.RunTriggerOptions{
 		PayloadPath: payloadPath,
 		Timeout:     timeout,
@@ -247,7 +289,7 @@ func (ui *terminalUI) runTrigger(triggers []internal.Trigger) error {
 }
 
 func (ui *terminalUI) prompt(label string) (string, error) {
-	fmt.Fprintf(ui.out, "%s: ", label)
+	fmt.Fprintf(ui.out, "%s %s %s ", ui.shellPrompt(), ui.paint(label, ansiDim, ansiGray), ui.paint(">", ansiBold, ansiGreenBright))
 	line, err := ui.reader.ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		return "", err
@@ -270,7 +312,7 @@ func (ui *terminalUI) promptRequired(label string) (string, error) {
 		if value != "" {
 			return value, nil
 		}
-		fmt.Fprintln(ui.out, "Value is required.")
+		ui.printWarning("value is required")
 	}
 }
 
@@ -299,13 +341,13 @@ func (ui *terminalUI) promptYesNo(label string, defaultValue bool) (bool, error)
 
 func (ui *terminalUI) showError(err error) error {
 	fmt.Fprintln(ui.errOut)
-	fmt.Fprintf(ui.errOut, "Error: %v\n", err)
-	return ui.pause("Press Enter to return to the menu...")
+	fmt.Fprintf(ui.errOut, "%s %s\n", ui.badge("fault", "execution aborted", ansiBlackRed), ui.paint(err.Error(), ansiRed, ansiBold))
+	return ui.pause("Press Enter to return to the console...")
 }
 
 func (ui *terminalUI) pause(message string) error {
 	fmt.Fprintln(ui.out)
-	fmt.Fprint(ui.out, message)
+	fmt.Fprintf(ui.out, "%s %s ", ui.paint("[ idle ]", ansiDim, ansiGray), ui.paint(message, ansiDim, ansiGray))
 	_, err := ui.reader.ReadString('\n')
 	if errors.Is(err, io.EOF) {
 		return nil
@@ -319,7 +361,130 @@ func (ui *terminalUI) clearScreen() {
 	}
 }
 
+func (ui *terminalUI) printBanner() {
+	lines := []string{
+		" _______  ____  ___   ____   ____  _____  ____",
+		"|_   _\\ \\/ /  \\|_ _| / ___| / ___|| ____|/ ___|",
+		"  | |  \\  /| |) || | | |  _  \\___ \\|  _|  \\___ \\",
+		"  | |  /  \\|  _ < | | | |_| |  ___) | |___  ___) |",
+		"  |_| /_/\\_\\_| \\_\\___| \\____| |____/|_____| |____/",
+	}
+
+	fmt.Fprintln(ui.out, ui.paint(strings.Repeat("=", tuiWidth), ansiGreen, ansiDim))
+	for _, line := range lines {
+		fmt.Fprintln(ui.out, ui.paint(line, ansiGreenBright, ansiBold))
+	}
+	fmt.Fprintf(ui.out, "%s %s\n", ui.badge("console", "local ops", ansiBlackCyan), ui.paint("event->action relay // stash, forge, dispatch", ansiDim, ansiGray))
+	fmt.Fprintln(ui.out, ui.paint(strings.Repeat("=", tuiWidth), ansiGreen, ansiDim))
+	fmt.Fprintln(ui.out)
+}
+
+func (ui *terminalUI) printSection(title string) {
+	header := "[ " + strings.ToUpper(title) + " ]"
+	if len(header) < tuiWidth {
+		header += strings.Repeat("-", tuiWidth-len(header))
+	}
+	fmt.Fprintln(ui.out, ui.paint(header, ansiGreen, ansiBold))
+}
+
+func (ui *terminalUI) printSuccess(message string) {
+	fmt.Fprintf(ui.out, "%s %s\n", ui.badge("ok", "write complete", ansiBlackGreen), ui.paint(message, ansiGreenBright, ansiBold))
+}
+
+func (ui *terminalUI) printWarning(message string) {
+	fmt.Fprintf(ui.out, "%s %s\n", ui.badge("warn", "attention", ansiBlackYellow), ui.paint(message, ansiYellow, ansiBold))
+}
+
+func (ui *terminalUI) actionLabel(id string) string {
+	return ui.badge(id, "op", ansiBlackGreen)
+}
+
+func (ui *terminalUI) formatTriggerLine(index int, trigger internal.Trigger) string {
+	meta := ui.badge(fmt.Sprintf("%02d", index+1), "idx", ansiBlackGreen)
+	name := ui.paint(padRight(trigger.Name, 18), ansiCyan, ansiBold)
+	preview := ui.paint(shorten(ui.commandPreview(trigger), 42), ansiGray)
+	line := fmt.Sprintf("  %s  %s :: %s", meta, name, preview)
+	if trigger.ScriptContent != "" {
+		line += " " + ui.badge("script", trigger.ScriptPath, ansiBlackYellow)
+	}
+	return line
+}
+
+func (ui *terminalUI) commandPreview(trigger internal.Trigger) string {
+	parts := append([]string{trigger.Command}, trigger.Args...)
+	return strings.Join(parts, " ")
+}
+
+func (ui *terminalUI) modeLabel(dryRun bool) string {
+	if dryRun {
+		return "simulate"
+	}
+	return "live"
+}
+
+func (ui *terminalUI) modeColor(dryRun bool) string {
+	if dryRun {
+		return ansiBlackYellow
+	}
+	return ansiBlackGreen
+}
+
+func (ui *terminalUI) modeTextColor(dryRun bool) string {
+	if dryRun {
+		return ansiYellow
+	}
+	return ansiGreenBright
+}
+
+func (ui *terminalUI) toggleColor(enabled bool) string {
+	if enabled {
+		return ansiBlackCyan
+	}
+	return ansiBlackYellow
+}
+
+func (ui *terminalUI) shellPrompt() string {
+	return ui.paint("root@trigger", ansiGreenBright, ansiBold)
+}
+
+func (ui *terminalUI) badge(label string, value string, color string) string {
+	raw := fmt.Sprintf(" %s:%s ", strings.ToUpper(label), value)
+	if !ui.canStyle {
+		return "[" + raw[1:len(raw)-1] + "]"
+	}
+	return ui.paint(raw, color, ansiBold)
+}
+
+func (ui *terminalUI) paint(text string, codes ...string) string {
+	if !ui.canStyle || len(codes) == 0 {
+		return text
+	}
+	return strings.Join(codes, "") + text + ansiReset
+}
+
 func canClearScreen(out io.Writer) bool {
+	file, ok := out.(*os.File)
+	if !ok {
+		return false
+	}
+
+	if os.Getenv("TERM") == "" || os.Getenv("TERM") == "dumb" {
+		return false
+	}
+
+	info, err := file.Stat()
+	if err != nil {
+		return false
+	}
+
+	return info.Mode()&os.ModeCharDevice != 0
+}
+
+func canUseANSI(out io.Writer) bool {
+	if os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+
 	file, ok := out.(*os.File)
 	if !ok {
 		return false
@@ -414,4 +579,25 @@ func splitCommandLine(line string) ([]string, error) {
 
 	flush()
 	return parts, nil
+}
+
+func onOff(enabled bool) string {
+	if enabled {
+		return "on"
+	}
+	return "off"
+}
+
+func shorten(value string, max int) string {
+	if len(value) <= max || max < 4 {
+		return value
+	}
+	return value[:max-3] + "..."
+}
+
+func padRight(value string, width int) string {
+	if len(value) >= width {
+		return value
+	}
+	return value + strings.Repeat(" ", width-len(value))
 }
