@@ -169,6 +169,46 @@ func TestRunCmdExecutesEmbeddedScriptDirectlyWithShebang(t *testing.T) {
 	}
 }
 
+func TestRunCmdUsesShellForShellTrigger(t *testing.T) {
+	configDir := t.TempDir()
+	storage, err := internal.NewStorage(configDir)
+	if err != nil {
+		t.Fatalf("NewStorage() error = %v", err)
+	}
+
+	err = storage.SaveTriggers([]internal.Trigger{
+		{
+			Name:        "db-dump",
+			Command:     "sh",
+			CommandLine: "pg_dump [arg0] | zstd > [arg1]",
+			Shell:       true,
+			CreatedAt:   time.Now().UTC(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveTriggers() error = %v", err)
+	}
+
+	GlobalConfig = &internal.Config{ConfigDir: configDir}
+	GlobalDryRun = true
+	GlobalVerbose = false
+	runName = "db-dump"
+	runArgs = []string{"db name", "dump file.sql.zst"}
+	runPayload = ""
+	runTimeout = 0
+
+	output := captureStdout(t, func() {
+		if err := runCmd.RunE(runCmd, nil); err != nil {
+			t.Fatalf("RunE() error = %v", err)
+		}
+	})
+
+	expected := "[dry-run] would run: sh [-c pg_dump 'db name' | zstd > 'dump file.sql.zst']"
+	if !strings.Contains(output, expected) {
+		t.Fatalf("unexpected output: %q", output)
+	}
+}
+
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 

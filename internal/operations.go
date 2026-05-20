@@ -84,6 +84,41 @@ func CreateTrigger(storage *Storage, name string, command string, commandArgs []
 	return &trigger, nil
 }
 
+// CreateShellTrigger creates and persists a trigger backed by `sh -c`.
+func CreateShellTrigger(storage *Storage, name string, commandLine string, opts CreateTriggerOptions) (*Trigger, error) {
+	if storage.Exists(name) {
+		return nil, fmt.Errorf("trigger '%s' already exists", name)
+	}
+	if commandLine == "" {
+		return nil, fmt.Errorf("shell command line is required")
+	}
+
+	now := time.Now
+	if opts.Now != nil {
+		now = opts.Now
+	}
+
+	trigger := Trigger{
+		Name:        name,
+		Command:     "sh",
+		CommandLine: commandLine,
+		Shell:       true,
+		CreatedAt:   now().UTC(),
+	}
+
+	triggers, err := storage.LoadTriggers()
+	if err != nil {
+		return nil, err
+	}
+
+	triggers = append(triggers, trigger)
+	if err := storage.SaveTriggers(triggers); err != nil {
+		return nil, err
+	}
+
+	return &trigger, nil
+}
+
 // RunTrigger resolves and executes a stored trigger.
 func RunTrigger(storage *Storage, name string, runtimeArgs []string, opts RunTriggerOptions) error {
 	trigger, _, err := storage.FindByName(name)
@@ -91,11 +126,16 @@ func RunTrigger(storage *Storage, name string, runtimeArgs []string, opts RunTri
 		return err
 	}
 
-	resolvedArgs := ResolveArguments(trigger.Args, runtimeArgs)
-
 	commandToRun := trigger.Command
-	commandArgs := append([]string{}, resolvedArgs...)
-	if trigger.ScriptContent != "" {
+	commandArgs := append([]string{}, trigger.Args...)
+
+	switch {
+	case trigger.Shell:
+		commandToRun = "sh"
+		commandArgs = []string{"-c", ResolveShellCommandLine(trigger.CommandLine, runtimeArgs)}
+	case trigger.ScriptContent != "":
+		resolvedArgs := ResolveArguments(trigger.Args, runtimeArgs)
+		commandArgs = append([]string{}, resolvedArgs...)
 		scriptPath, err := WriteEmbeddedScript(
 			storage.ScriptsDir(),
 			trigger.Name,
@@ -124,6 +164,8 @@ func RunTrigger(storage *Storage, name string, runtimeArgs []string, opts RunTri
 			commandToRun = interpreter
 			commandArgs = append([]string{scriptPath}, resolvedArgs...)
 		}
+	default:
+		commandArgs = ResolveArguments(trigger.Args, runtimeArgs)
 	}
 
 	stdout := outputOrStd(opts.Stdout, os.Stdout)
@@ -184,6 +226,10 @@ func RunTrigger(storage *Storage, name string, runtimeArgs []string, opts RunTri
 
 // FormatTriggerSummary renders a single trigger in the same style as `trigger list`.
 func FormatTriggerSummary(trigger Trigger) string {
+	if trigger.Shell {
+		return fmt.Sprintf("%s: [shell] %s", trigger.Name, trigger.CommandLine)
+	}
+
 	if trigger.ScriptContent != "" {
 		return fmt.Sprintf("%s: %s %v [embedded: %s]", trigger.Name, trigger.Command, trigger.Args, trigger.ScriptPath)
 	}

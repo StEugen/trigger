@@ -88,3 +88,35 @@ func TestResolveTriggerSelection(t *testing.T) {
 		t.Fatalf("resolveTriggerSelection() expected out-of-range error")
 	}
 }
+
+func TestContainsShellSyntax(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{
+			name:  "plain command stays direct",
+			input: `echo hello world`,
+			want:  false,
+		},
+		{
+			name:  "pipeline is detected",
+			input: `pg_dump [arg0] | zstd > [arg1]`,
+			want:  true,
+		},
+		{
+			name:  "quoted pipe is ignored",
+			input: `echo "|"`,
+			want:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := containsShellSyntax(tt.input); got != tt.want {
+				t.Fatalf("containsShellSyntax(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
