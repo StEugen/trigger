@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -44,6 +45,7 @@ The TUI lets you:
   - list triggers stored on this machine
   - create a new trigger from a prompted command line
   - select and run an existing trigger
+  - open a constrained shell with a JSON-backed command allowlist
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage, err := internal.NewStorage(GlobalConfig.ConfigDir)
@@ -118,7 +120,13 @@ func (ui *terminalUI) Run() error {
 			}
 		case "3", "l", "list", "refresh", "":
 			continue
-		case "4", "q", "quit", "exit":
+		case "4", "s", "shell":
+			if err := ui.runShell(); err != nil {
+				if pauseErr := ui.showError(err); pauseErr != nil {
+					return pauseErr
+				}
+			}
+		case "5", "q", "quit", "exit":
 			ui.clearScreen()
 			fmt.Fprintln(ui.out, ui.note("[ session closed ]"))
 			return nil
@@ -156,9 +164,10 @@ func (ui *terminalUI) renderHome(triggers []internal.Trigger) {
 	fmt.Fprintf(ui.out, "  %s %s forge a new trigger into local storage\n", ui.actionLabel("1"), ui.paint("create", ansiBold, ansiGreenBright))
 	fmt.Fprintf(ui.out, "  %s %s dispatch an existing trigger\n", ui.actionLabel("2"), ui.paint("run", ansiBold, ansiGreenBright))
 	fmt.Fprintf(ui.out, "  %s %s reload trigger cache view\n", ui.actionLabel("3"), ui.paint("refresh", ansiBold, ansiGreenBright))
-	fmt.Fprintf(ui.out, "  %s %s leave the console\n", ui.actionLabel("4"), ui.paint("quit", ansiBold, ansiGreenBright))
+	fmt.Fprintf(ui.out, "  %s %s open the constrained local shell\n", ui.actionLabel("4"), ui.paint("shell", ansiBold, ansiGreenBright))
+	fmt.Fprintf(ui.out, "  %s %s leave the console\n", ui.actionLabel("5"), ui.paint("quit", ansiBold, ansiGreenBright))
 	fmt.Fprintln(ui.out)
-	fmt.Fprintf(ui.out, "  %s %s\n", ui.paint("[ tip ]", ansiYellow, ansiBold), ui.note("quoted args and escaped spaces are preserved."))
+	fmt.Fprintf(ui.out, "  %s %s\n", ui.paint("[ tip ]", ansiYellow, ansiBold), ui.note("pipes and redirects are stored as shell triggers automatically; shell allowlist lives in whitelist_shell.json."))
 	fmt.Fprintln(ui.out)
 }
 
@@ -180,18 +189,26 @@ func (ui *terminalUI) createTrigger() error {
 		return err
 	}
 
-	parts, err := splitCommandLine(commandLine)
-	if err != nil {
-		return err
-	}
-	if len(parts) == 0 {
-		return fmt.Errorf("command line is required")
-	}
+	var trigger *internal.Trigger
+	if containsShellSyntax(commandLine) {
+		trigger, err = internal.CreateShellTrigger(ui.storage, name, commandLine, internal.CreateTriggerOptions{
+			Verbose: ui.verbose,
+			Output:  ui.out,
+		})
+	} else {
+		parts, err := splitCommandLine(commandLine)
+		if err != nil {
+			return err
+		}
+		if len(parts) == 0 {
+			return fmt.Errorf("command line is required")
+		}
 
-	trigger, err := internal.CreateTrigger(ui.storage, name, parts[0], parts[1:], internal.CreateTriggerOptions{
-		Verbose: ui.verbose,
-		Output:  ui.out,
-	})
+		trigger, err = internal.CreateTrigger(ui.storage, name, parts[0], parts[1:], internal.CreateTriggerOptions{
+			Verbose: ui.verbose,
+			Output:  ui.out,
+		})
+	}
 	if err != nil {
 		return err
 	}
@@ -199,6 +216,8 @@ func (ui *terminalUI) createTrigger() error {
 	fmt.Fprintln(ui.out)
 	if trigger.ScriptContent != "" {
 		ui.printSuccess(fmt.Sprintf("trigger '%s' forged with embedded script payload", trigger.Name))
+	} else if trigger.Shell {
+		ui.printSuccess(fmt.Sprintf("trigger '%s' forged as a shell trigger", trigger.Name))
 	} else {
 		ui.printSuccess(fmt.Sprintf("trigger '%s' forged and indexed", trigger.Name))
 	}
@@ -405,6 +424,9 @@ func (ui *terminalUI) formatTriggerLine(index int, trigger internal.Trigger) str
 	name := ui.paint(padRight(trigger.Name, 18), ansiCyan, ansiBold)
 	preview := ui.note(shorten(ui.commandPreview(trigger), 42))
 	line := fmt.Sprintf("  %s  %s :: %s", meta, name, preview)
+	if trigger.Shell {
+		line += " " + ui.badge("shell", "sh -c", ansiBlackCyan)
+	}
 	if trigger.ScriptContent != "" {
 		line += " " + ui.badge("script", trigger.ScriptPath, ansiBlackYellow)
 	}
@@ -412,6 +434,9 @@ func (ui *terminalUI) formatTriggerLine(index int, trigger internal.Trigger) str
 }
 
 func (ui *terminalUI) commandPreview(trigger internal.Trigger) string {
+	if trigger.Shell {
+		return trigger.CommandLine
+	}
 	parts := append([]string{trigger.Command}, trigger.Args...)
 	return strings.Join(parts, " ")
 }
@@ -552,6 +577,114 @@ func resolveTriggerSelection(triggers []internal.Trigger, selection string) (*in
 	return nil, fmt.Errorf("trigger '%s' not found", selection)
 }
 
+func (ui *terminalUI) runShell() error {
+	whitelist, err := ui.storage.LoadShellWhitelist()
+	if err != nil {
+		return err
+	}
+
+	allowed := make(map[string]struct{}, len(whitelist))
+	for _, command := range whitelist {
+		allowed[command] = struct{}{}
+	}
+
+	ui.clearScreen()
+	ui.printBanner()
+	ui.printSection("TUI SHELL")
+	if cwd, err := os.Getwd(); err == nil {
+		fmt.Fprintf(ui.out, "  %s %s\n", ui.label("cwd"), ui.paint(cwd, ansiCyan))
+	}
+	fmt.Fprintf(ui.out, "  %s %s\n", ui.label("allowed"), ui.note(strings.Join(whitelist, ", ")))
+	fmt.Fprintf(ui.out, "  %s %s\n", ui.label("config"), ui.note(ui.storage.ShellWhitelistPath()))
+	fmt.Fprintf(ui.out, "  %s %s\n\n", ui.label("exit"), ui.note("type back, exit, or quit to return to the console"))
+
+	for {
+		line, err := ui.prompt("shell")
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				fmt.Fprintln(ui.out)
+				return nil
+			}
+			return err
+		}
+		if line == "" {
+			continue
+		}
+
+		switch strings.ToLower(line) {
+		case "back", "exit", "quit":
+			return nil
+		}
+
+		if err := ui.executeShellCommand(line, allowed); err != nil {
+			ui.printWarning(err.Error())
+		}
+	}
+}
+
+func (ui *terminalUI) executeShellCommand(line string, allowed map[string]struct{}) error {
+	parts, err := splitCommandLine(line)
+	if err != nil {
+		return err
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+
+	command := parts[0]
+	if _, ok := allowed[command]; !ok {
+		return fmt.Errorf("shell command %q is not whitelisted in %s", command, ui.storage.ShellWhitelistPath())
+	}
+
+	if command == "cd" {
+		return changeDirectory(parts[1:])
+	}
+
+	cmd := exec.Command(command, parts[1:]...)
+	cmd.Stdout = ui.out
+	cmd.Stderr = ui.errOut
+	cmd.Stdin = os.Stdin
+	return cmd.Run()
+}
+
+func changeDirectory(args []string) error {
+	if len(args) > 1 {
+		return fmt.Errorf("cd accepts at most one path")
+	}
+
+	target := ""
+	if len(args) == 0 {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		target = home
+	} else {
+		target = expandHomePath(args[0])
+	}
+
+	return os.Chdir(target)
+}
+
+func expandHomePath(path string) string {
+	if path == "~" {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			return home
+		}
+		return path
+	}
+
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			return home + path[1:]
+		}
+	}
+
+	return path
+}
+
 func splitCommandLine(line string) ([]string, error) {
 	var (
 		parts        []string
@@ -604,6 +737,34 @@ func splitCommandLine(line string) ([]string, error) {
 
 	flush()
 	return parts, nil
+}
+
+func containsShellSyntax(line string) bool {
+	var (
+		inSingle bool
+		inDouble bool
+		escaped  bool
+	)
+
+	for _, r := range line {
+		switch {
+		case escaped:
+			escaped = false
+		case r == '\\' && !inSingle:
+			escaped = true
+		case r == '\'' && !inDouble:
+			inSingle = !inSingle
+		case r == '"' && !inSingle:
+			inDouble = !inDouble
+		case !inSingle && !inDouble:
+			switch r {
+			case '|', '>', '<', ';', '&':
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func onOff(enabled bool) string {

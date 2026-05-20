@@ -1,198 +1,148 @@
 # trigger
 
-A lightweight DevSecOps CLI utility for creating, managing, and running "triggers" — named commands that can be saved, reused, and executed with dynamic arguments and embedded scripts.
-
-NOTICE: XDXD TOOL COMPLETELY Very Inefficient But Entertaining CODED. I'm gonna refactor it later. I just want some tool like that.
+A lightweight CLI for storing, listing, and running reusable local commands as named triggers.
 
 ## Features
 
-### Core Capabilities
-
-- **Create Triggers** — Register named commands with optional default arguments and save them to disk
-- **List Triggers** — View all registered triggers and their commands
-- **Run Triggers** — Execute triggers by name with:
-  - **Argument Substitution** — Use `[arg0]`, `[arg1]`, etc. as placeholders for runtime arguments
-  - **Payload Piping** — Pass JSON/text payloads via stdin
-  - **Timeout Support** — Kill long-running commands
-  - **Dry-run Mode** — Preview what would execute without running
-- **Interactive TUI** — Manage local triggers in a terminal UI for listing, creating, and running triggers
-- **Script Embedding** — Automatically detect and embed script files (`.sh`, `.py`, `.js`, `.rb`, `.php`, `.pl`, `.lua`, `.groovy`, `.swift`) so they don't need to exist on disk
-- **Sign Payloads** — Compute HMAC-SHA256 signatures using `TRIGGER_SECRET` env var (useful for webhook verification)
-- **Shell Completions** — Generate completion scripts for bash, zsh, fish, and powershell
+- Create named triggers and store them locally
+- Run triggers with runtime placeholders like `[arg0]`, `[arg1]`, and so on
+- Pass a file to trigger stdin with `--payload`
+- Kill long-running commands with `--timeout`
+- Preview execution with `--dry-run`
+- Embed local scripts into trigger storage automatically
+- Store raw shell command lines for pipelines and redirection with shell triggers
+- Use an interactive TUI to create, run, and inspect triggers
+- Open a constrained TUI shell backed by `whitelist_shell.json`
+- Compute HMAC-SHA256 signatures with `trigger sign`
+- Generate shell completions for `bash`, `zsh`, `fish`, and `powershell`
 
 ## Installation
 
-### Build from Source
+### Build from source
 
 ```bash
 git clone https://github.com/steugen/trigger.git
 cd trigger
-go build -o trigger main.go
+go build -o trigger ./main.go
 ```
 
 ## Configuration
 
-Triggers are stored in `$XDG_CONFIG_HOME/trigger/triggers.json` (or `~/.config/trigger/triggers.json` on most systems).
+By default, trigger stores data under:
 
-Scripts are embedded and stored in `~/.config/trigger/scripts/`.
+- `$XDG_CONFIG_HOME/trigger` when `XDG_CONFIG_HOME` is set
+- `~/.config/trigger` otherwise
 
-## Usage
+Files created there:
 
-### Creating Triggers
+- `triggers.json`: JSON array of registered triggers
+- `scripts/`: embedded script copies used at runtime
+- `whitelist_shell.json`: allowlist for the TUI shell
 
-#### Basic Trigger
+Default `whitelist_shell.json`:
 
-Create a simple trigger that runs a command:
-
-```bash
-trigger create mycommand -- echo "Hello, World!"
+```json
+{
+  "commands": ["cd", "ls"]
+}
 ```
 
-### Deleting Triggers
+## Commands
 
-Delete a trigger with name: 
-
-```bash
-trigger delete --name mycommand 
-```
-
-#### Trigger with Arguments
-
-Create a trigger with placeholder arguments that can be filled at runtime:
+### Create a direct trigger
 
 ```bash
 trigger create backup -- tar -czf '[arg0]' /etc
 ```
 
-When running, you can provide arguments:
+This stores a direct command plus argv. It does not use a shell.
+
+### Create a shell trigger
+
+Use this for pipelines, redirection, command substitution, or other shell syntax:
 
 ```bash
-trigger run --name backup --args ./backup.tar.gz
-# Executes: tar -czf ./backup.tar.gz /etc
+trigger create db-dump --shell -- "pg_dump [arg0] | zstd > [arg1]"
 ```
 
-Multiple argument placeholders:
+Shell trigger placeholders are shell-escaped before execution.
+
+### Create a trigger from a script
 
 ```bash
-trigger create copy -- cp '[arg0]' '[arg1]'
+trigger create notify-slack -- ./send_slack.sh
 ```
 
-```bash
-trigger run --name copy --args /source/file.txt /dest/file.txt
-# Executes: cp /source/file.txt /dest/file.txt
-```
+If the command points to an existing script file with a supported extension, trigger embeds its contents and writes a runnable copy into the config `scripts/` directory.
 
-**Note:** Quote the placeholder arguments (`[arg0]`, `[arg1]`, etc.) to prevent your shell from interpreting the square brackets as glob patterns.
+Supported script extensions:
 
-#### Trigger with Embedded Script
+- `.sh`
+- `.py`
+- `.js`
+- `.rb`
+- `.php`
+- `.pl`
+- `.lua`
+- `.groovy`
+- `.swift`
 
-Create a trigger from a script file. The script content is automatically embedded, so you don't need to have the script present when running the trigger:
-
-```bash
-trigger create alert-slack -- ./send_slack_alert.sh
-```
-
-This will:
-- Read the content of `./send_slack_alert.sh`
-- Embed it into the trigger configuration
-- Store it in `~/.config/trigger/scripts/alert-slack.sh`
-
-When you run it, the embedded script will be executed:
-
-```bash
-trigger run --name alert-slack --payload message.json
-```
-
-#### Combined: Script with Argument Placeholders
-
-```bash
-trigger create process-data -- ./transform.py '[arg0]' '[arg1]'
-```
-
-```bash
-trigger run --name process-data --args input.csv output.csv
-# Executes: transform.py input.csv output.csv
-```
-
-### Listing Triggers
-
-View all registered triggers:
+### List triggers
 
 ```bash
 trigger list
 ```
 
-Output:
-```
-- backup: tar -czf [arg0] /etc
-- alert-slack: /home/user/.config/trigger/scripts/alert-slack.sh [embedded: send_slack_alert.sh]
-- copy: cp [arg0] [arg1]
-```
+Example output:
 
-### Terminal UI
-
-Open the interactive terminal UI:
-
-```bash
-trigger tui
+```text
+- backup: tar [-czf [arg0] /etc]
+- notify-slack: /home/user/.config/trigger/scripts/notify-slack.sh [] [embedded: send_slack.sh]
+- db-dump: [shell] pg_dump [arg0] | zstd > [arg1]
 ```
 
-From there you can:
-- view all locally registered triggers
-- create a new trigger by entering a command line
-- select a trigger by number or name and run it
-
-### Running Triggers
-
-#### Basic Execution
-
-```bash
-trigger run --name mycommand
-```
-
-#### With Arguments
+### Run a trigger
 
 ```bash
 trigger run --name backup --args ./backup.tar.gz
-trigger run --name copy --args file1.txt file2.txt
+trigger run --name db-dump --args mydb dumps/mydb.sql.zst
 ```
 
-#### With Payload File
+Runtime arguments can be passed through `--args` and also as extra positional args after the flags.
 
-Pipe a file to stdin (useful for webhooks, data processing):
+With stdin payload:
 
 ```bash
-trigger run --name alert-slack --payload event.json
+trigger run --name notify-slack --payload alert.json
 ```
 
-The file contents will be written to the command's stdin.
-
-#### With Timeout
-
-Kill the command if it takes too long:
+With timeout:
 
 ```bash
 trigger run --name long-task --timeout 30s
 ```
 
-#### Dry-run Mode
-
-Preview what would execute without actually running it:
+Dry run:
 
 ```bash
 trigger run --name backup --args ./backup.tar.gz --dry-run
-# Output: [dry-run] would run: tar -czf ./backup.tar.gz /etc
 ```
 
-#### Verbose Output
+Verbose mode:
 
 ```bash
-trigger run --name mycommand --verbose
+trigger run --name backup --args ./backup.tar.gz --verbose
 ```
 
-### Signing Payloads
+### Delete a trigger
 
-Compute HMAC-SHA256 signatures for webhook verification or payload authentication:
+```bash
+trigger delete --name backup
+```
+
+If the trigger has an embedded script, the stored script file is removed too.
+
+### Sign a payload
 
 Set the secret:
 
@@ -200,185 +150,142 @@ Set the secret:
 export TRIGGER_SECRET="your-secret-key"
 ```
 
-Sign a payload file:
+Sign a file:
 
 ```bash
 trigger sign --payload message.json
 ```
 
-Sign from stdin:
+Sign stdin:
 
 ```bash
 echo '{"event":"push"}' | trigger sign
 ```
 
-Output: hexadecimal HMAC-SHA256 digest
-
-### Shell Completions
-
-Generate completion scripts for your shell:
-
-#### Bash
+### Open the TUI
 
 ```bash
-trigger completion bash > /etc/bash_completion.d/trigger
-# or
-trigger completion bash > ~/.bash_completion.d/trigger
-source ~/.bash_completion.d/trigger
+trigger tui
 ```
 
-#### Zsh
+The TUI can:
+
+- list triggers
+- create triggers from prompted command lines
+- run existing triggers
+- open a constrained shell
+
+TUI shell behavior:
+
+- only commands listed in `whitelist_shell.json` can run
+- `cd` is handled internally
+- `ls` is allowed by default
+- this shell executes direct commands only; it does not interpret pipelines or redirection
+
+When you create a trigger in the TUI, common shell operators such as `|`, `>`, `<`, `;`, and `&` are detected and the trigger is stored as a shell trigger automatically.
+
+### Generate completions
 
 ```bash
-trigger completion zsh > ~/.zsh/completions/_trigger
+trigger completion bash
+trigger completion zsh
+trigger completion fish
+trigger completion powershell
 ```
 
-#### Fish
+### Print the version
 
 ```bash
-trigger completion fish > ~/.config/fish/completions/trigger.fish
+trigger version
 ```
 
-#### PowerShell
+## Global flags
 
-```powershell
-trigger completion powershell | Out-String | Invoke-Expression
+Available on all commands:
+
+```text
+--dry-run       don't execute commands; show what would run
+-v, --verbose   verbose output
 ```
 
 ## Examples
 
-### 1. Database Backup Trigger
+### Database backup
 
 ```bash
-# Create a backup trigger with date argument
-trigger create db-backup -- mysqldump -u root [arg0] > /backups/[arg0]-$(date +%Y%m%d).sql
-trigger run --name db-backup --args mydb
+trigger create db-backup --shell -- "pg_dump [arg0] | zstd > [arg1]"
+trigger run --name db-backup --args mydb dumps/mydb.sql.zst
 ```
 
-### 2. Slack Notification Trigger
+### Slack notification
 
 ```bash
-# Create script: send_slack.sh
-#!/bin/bash
-curl -X POST -H 'Content-type: application/json' \
-  --data @- \
-  https://hooks.slack.com/services/YOUR/WEBHOOK/URL
-
-# Register it
 trigger create notify-slack -- ./send_slack.sh
-
-# Use it
 trigger run --name notify-slack --payload alert.json
 ```
 
-### 3. Log Processing Trigger
+### Log processing
 
 ```bash
 trigger create process-logs -- gawk -f '[arg0]' '[arg1]'
 trigger run --name process-logs --args filter.awk access.log
 ```
 
-### 4. Webhook Handler with Signature Verification
-
-```bash
-# Create a webhook handler script
-trigger create webhook-handler -- ./verify_and_process.sh
-
-# Sign incoming webhook
-trigger sign --payload webhook_payload.json
-
-# Run handler with payload
-trigger run --name webhook-handler --payload webhook_payload.json
-```
-
-## Global Flags
-
-```
---config string      Config file (optional)
---dry-run           Don't execute commands; show what would run
--v, --verbose       Verbose output
-```
-
-## Directory Structure
-
-```
-~/.config/trigger/
-├── triggers.json      # All registered triggers
-└── scripts/           # Embedded script files
-    ├── alert-slack.sh
-    ├── process-data.py
-    └── ...
-```
-
-## Architecture
-
-### Trigger Storage Format
-
-Each trigger is stored in `triggers.json`:
-
-```json
-{
-  "name": "backup",
-  "command": "tar",
-  "args": ["-czf", "[arg0]", "/etc"],
-  "script_content": "",
-  "script_path": "",
-  "created_at": "2024-01-15T10:30:00Z"
-}
-```
-
-For embedded scripts:
-
-```json
-{
-  "name": "alert-slack",
-  "command": "/home/user/.config/trigger/scripts/alert-slack.sh",
-  "args": [],
-  "script_content": "#!/bin/bash\ncurl ...",
-  "script_path": "send_slack_alert.sh",
-  "created_at": "2024-01-15T10:35:00Z"
-}
-```
-
-### Script Detection
-
-Scripts are identified by file extension. Supported extensions:
-- `.sh`, `.py`, `.js`, `.rb`, `.php`, `.pl`, `.lua`, `.groovy`, `.swift`
-
-When a script file is detected during trigger creation, its content is:
-1. Read from disk
-2. Embedded into the trigger JSON
-3. Written to `~/.config/trigger/scripts/` for execution
-
-This approach allows triggers to be portable — the script doesn't need to exist at the original path when running.
-
-## Argument Placeholder System
-
-Placeholders use the format `[argN]` where `N` is a zero-indexed number:
-
-- `[arg0]` — First runtime argument
-- `[arg1]` — Second runtime argument
-- `[arg2]` — Third runtime argument
-- etc.
-
-Example:
+### Deploy copy
 
 ```bash
 trigger create deploy -- rsync -av '[arg0]' '[arg1]'
 trigger run --name deploy --args ./src/ user@server:/dest/
 ```
 
-This resolves to: `rsync -av ./src/ user@server:/dest/`
+## Storage format
 
-## Environment Variables
+`triggers.json` is a JSON array. Direct triggers look like this:
 
-- `TRIGGER_SECRET` — Used by the `sign` command to compute HMAC-SHA256
-- `XDG_CONFIG_HOME` — Config directory (defaults to `~/.config` if not set)
+```json
+[
+  {
+    "name": "backup",
+    "command": "tar",
+    "args": ["-czf", "[arg0]", "/etc"],
+    "created_at": "2024-01-15T10:30:00Z"
+  }
+]
+```
+
+Shell triggers add `shell` and `command_line`:
+
+```json
+[
+  {
+    "name": "db-dump",
+    "command": "sh",
+    "command_line": "pg_dump [arg0] | zstd > [arg1]",
+    "shell": true,
+    "created_at": "2024-01-15T10:35:00Z"
+  }
+]
+```
+
+Embedded script triggers include script metadata and stored content:
+
+```json
+[
+  {
+    "name": "notify-slack",
+    "command": "/home/user/.config/trigger/scripts/notify-slack.sh",
+    "script_content": "#!/bin/sh\ncurl ...",
+    "script_path": "send_slack.sh",
+    "created_at": "2024-01-15T10:40:00Z"
+  }
+]
+```
+
+## Environment variables
+
+- `TRIGGER_SECRET`: secret used by `trigger sign`
+- `XDG_CONFIG_HOME`: base directory for trigger config files
 
 ## License
 
-See LICENSE file for details.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit issues and pull requests.
+See [LICENSE](LICENSE).

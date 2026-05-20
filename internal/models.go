@@ -6,9 +6,11 @@ import "time"
 type Trigger struct {
 	Name          string            `json:"name"`
 	Command       string            `json:"command"`
+	CommandLine   string            `json:"command_line,omitempty"`
 	Args          []string          `json:"args,omitempty"`
 	Description   string            `json:"description,omitempty"`
 	Meta          map[string]string `json:"meta,omitempty"`
+	Shell         bool              `json:"shell,omitempty"`
 	ScriptContent string            `json:"script_content,omitempty"`
 	ScriptPath    string            `json:"script_path,omitempty"`
 	CreatedAt     time.Time         `json:"created_at"`
